@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+.pio/
+.pioenvs/
+.piolib/
+.vscode/
+
+data/*.bin
+data/*.png
+*.swp
+.DS_Store

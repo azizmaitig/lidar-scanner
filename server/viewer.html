@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D LiDAR Scanner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #ccc; font: 14px monospace; overflow: hidden; height: 100vh; }
+  #canvas-container { width: 100vw; height: 100vh; }
+  #sidebar {
+    position: fixed; top: 10px; right: 10px; width: 240px;
+    background: rgba(20,20,20,0.92); border: 1px solid #333;
+    border-radius: 8px; padding: 14px; font-size: 12px; z-index: 10;
+  }
+  #sidebar h3 { margin-bottom: 8px; color: #0af; }
+  .row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .row input[type=range] { flex: 1; margin: 0 8px; }
+  .row .val { width: 40px; text-align: right; color: #0af; }
+  #status { color: #0f0; margin-bottom: 6px; }
+  #status.disconnected { color: #f44; }
+  .btn {
+    background: #333; border: 1px solid #555; color: #ccc;
+    padding: 4px 10px; border-radius: 4px; cursor: pointer;
+    font: 12px monospace; margin: 2px;
+  }
+  .btn:hover { background: #444; }
+  #log { max-height: 120px; overflow-y: auto; font-size: 10px; margin-top: 6px; border-top: 1px solid #333; padding-top: 4px; }
+  #log div { color: #888; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div id="status" class="disconnected">● DISCONNECTED</div>
+  <h3>Controls</h3>
+  <div class="row">
+    <span>Point size</span>
+    <input type="range" id="ptSize" min="1" max="20" value="3">
+    <span class="val" id="ptSize-val">3</span>
+  </div>
+  <div class="row">
+    <span>Color mode</span>
+    <select id="colorMode" style="flex:1;margin:0 8px;background:#222;color:#ccc;border:1px solid #555">
+      <option value="height">Height</option>
+      <option value="distance">Distance</option>
+      <option value="quality">Quality</option>
+    </select>
+  </div>
+  <div class="row">
+    <span>Colors</span>
+    <span id="colorLegend" style="flex:1;height:14px;border-radius:3px;background:linear-gradient(to right,#00f,#0ff,#0f0,#ff0,#f00)"></span>
+  </div>
+  <hr style="border-color:#333;margin:6px 0">
+  <div class="row"><span>Points</span><span id="stat-pts">0</span></div>
+  <div class="row"><span>Rotations</span><span id="stat-rot">0</span></div>
+  <div class="row"><span>Samples</span><span id="stat-samp">0</span></div>
+  <div class="row"><span>FPS</span><span id="stat-fps">0</span></div>
+  <div class="row"><span>Tilt</span><span id="stat-tilt">0.0°</span></div>
+  <div style="margin-top:6px">
+    <button class="btn" id="btnClear">Clear</button>
+    <button class="btn" id="btnReset">Reset View</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="canvas-container"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─── State ───────────────────────────────────────────────────────
+const MAX_PTS = 300000;
+let pointCount = 0, rotationCount = 0, sampleCount = 0;
+let frameCount = 0, lastFpsTime = performance.now();
+
+// ─── Scene setup ────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x111122);
+
+const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100);
+camera.position.set(0, 2, 3);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.5, 0);
+controls.update();
+
+// ─── Grid & axes ────────────────────────────────────────────────
+scene.add(new THREE.GridHelper(6, 12, 0x444466, 0x333355));
+scene.add(new THREE.AxesHelper(1));
+
+// ─── Point cloud ────────────────────────────────────────────────
+const positions = new Float32Array(MAX_PTS * 3);
+const colors = new Float32Array(MAX_PTS * 3);
+const geometry = new THREE.BufferGeometry();
+geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+geometry.setDrawRange(0, 0);
+
+const material = new THREE.PointsMaterial({
+  size: 3, vertexColors: true, transparent: true, opacity: 0.9,
+  blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+});
+const points = new THREE.Points(geometry, material);
+scene.add(points);
+
+// ─── Color helpers ──────────────────────────────────────────────
+function heightColor(y, minY, maxY) {
+  const t = maxY > minY ? (y - minY) / (maxY - minY) : 0.5;
+  return hslToRgb(0.66 - t * 0.66, 0.9, 0.5);
+}
+
+function distColor(d, maxD) {
+  const t = maxD > 0 ? d / maxD : 0;
+  return hslToRgb(0.0 + t * 0.15, 0.9, 0.5);
+}
+
+function qualColor(q) {
+  const t = q / 255;
+  return [0.2 + t * 0.8, t * 0.6, 0.4 + t * 0.3];
+}
+
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 1/6) { r = c; g = x; b = 0; }
+  else if (h < 2/6) { r = x; g = c; b = 0; }
+  else if (h < 3/6) { r = 0; g = c; b = x; }
+  else if (h < 4/6) { r = 0; g = x; b = c; }
+  else if (h < 5/6) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  return [r + m, g + m, b + m];
+}
+
+// ─── WebSocket ──────────────────────────────────────────────────
+let ws;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('status').textContent = '● CONNECTED';
+    document.getElementById('status').className = '';
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type !== 'scan') return;
+
+    rotationCount = data.rotation;
+    sampleCount = data.samples;
+
+    const tiltEl = document.getElementById('stat-tilt');
+    if (data.tilt_angle !== undefined) tiltEl.textContent = `${data.tilt_angle.toFixed(1)}°`;
+
+    const colorMode = document.getElementById('colorMode').value;
+    let minY = Infinity, maxY = -Infinity;
+    if (colorMode === 'height') {
+      for (const p of data.points) {
+        if (p.z < minY) minY = p.z;
+        if (p.z > maxY) maxY = p.z;
+      }
+    }
+    let maxD = 0;
+    if (colorMode === 'distance') {
+      for (const p of data.points) {
+        const d = Math.sqrt(p.x*p.x + p.y*p.y);
+        if (d > maxD) maxD = d;
+      }
+    }
+
+    for (const p of data.points) {
+      if (pointCount >= MAX_PTS) continue;
+      const i3 = pointCount * 3;
+      positions[i3] = p.x / 1000;
+      positions[i3+1] = p.y / 1000;
+      positions[i3+2] = p.z / 1000;
+
+      let c;
+      if (colorMode === 'height') c = heightColor(p.z / 1000, minY / 1000, maxY / 1000);
+      else if (colorMode === 'distance') c = distColor(Math.sqrt(p.x*p.x + p.y*p.y) / 1000, maxD / 1000);
+      else c = qualColor(p.quality);
+
+      colors[i3] = c[0];
+      colors[i3+1] = c[1];
+      colors[i3+2] = c[2];
+      pointCount++;
+    }
+
+    geometry.setDrawRange(0, pointCount);
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+
+    document.getElementById('stat-pts').textContent = pointCount;
+    document.getElementById('stat-rot').textContent = rotationCount;
+    document.getElementById('stat-samp').textContent = sampleCount;
+
+    addLog(`Rot ${rotationCount}: ${data.samples} samples, ${data.valid} valid`);
+  };
+
+  ws.onclose = () => {
+    document.getElementById('status').textContent = '● DISCONNECTED';
+    document.getElementById('status').className = 'disconnected';
+    setTimeout(connectWS, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+connectWS();
+
+// ─── UI ─────────────────────────────────────────────────────────
+document.getElementById('ptSize').oninput = (e) => {
+  const v = parseInt(e.target.value);
+  document.getElementById('ptSize-val').textContent = v;
+  material.size = v;
+};
+
+document.getElementById('btnClear').onclick = () => {
+  pointCount = 0;
+  geometry.setDrawRange(0, 0);
+  document.getElementById('stat-pts').textContent = '0';
+};
+
+document.getElementById('btnReset').onclick = () => {
+  camera.position.set(0, 2, 3);
+  controls.target.set(0, 0.5, 0);
+  controls.update();
+};
+
+const logEl = document.getElementById('log');
+function addLog(msg) {
+  const d = document.createElement('div');
+  d.textContent = msg;
+  logEl.appendChild(d);
+  if (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ─── Render loop ────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime > 1000) {
+    document.getElementById('stat-fps').textContent = frameCount;
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+}
+animate();
+
+// ─── Resize ─────────────────────────────────────────────────────
+window.onresize = () => {
+  const w = container.clientWidth, h = container.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+};
+</script>
+</body>
+</html>
