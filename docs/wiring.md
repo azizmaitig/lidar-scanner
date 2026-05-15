@@ -8,7 +8,7 @@
 | GND       | GND         |
 | VCC       | External 5V |
 
-Common baud rates: 115200, 230400, 256000.
+baud rates: 115200 .
 
 ## Motor + Encoder → H-Bridge → ESP8266
 
