@@ -1,6 +1,7 @@
 # lidar-scanner
 
 > **Work in progress.** Low-cost 3D LiDAR scanner built from a repurposed Neato XV-11 LiDAR, ESP8266, and a DC motor with quadrature encoder.
+<img width="4624" height="3468" alt="20260515_214652" src="https://github.com/user-attachments/assets/ffebda76-4261-4382-aba3-404ac93eeadb" />
 
 ## Architecture
 
