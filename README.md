@@ -35,6 +35,9 @@ python server/server.py --lidar-disable
 | Driver | H-bridge (DRV8833 / L298N) |
 | Slip ring | For continuous rotation (power + UART + encoder) |
 
+<img width="996" height="658" alt="lidar" src="https://github.com/user-attachments/assets/bac481c6-3bc3-4dea-b1e8-8bd24c839470" />
+
+
 See [`docs/wiring.md`](docs/wiring.md) for pinouts and [`docs/BOM.md`](docs/BOM.md) for parts.
 
 ## Project Status
