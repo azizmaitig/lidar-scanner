@@ -1,11 +1,11 @@
-# progress
-
-<img width="1913" height="927" alt="Capture d&#39;écran 2026-05-14 224032" src="https://github.com/user-attachments/assets/1a6cbdfa-80d5-4707-ac71-274e193dd188" />
-
 # lidar-scanner
 
 > **Work in progress.** Low-cost 3D LiDAR scanner built from a repurposed Neato XV-11 LiDAR, ESP8266, and a DC motor with quadrature encoder.
 <img width="4624" height="3468" alt="20260515_214652" src="https://github.com/user-attachments/assets/ffebda76-4261-4382-aba3-404ac93eeadb" />
+
+# progress(experimenting the use of phone sensor as stabiliser ) 
+
+<img width="1913" height="927" alt="Capture d&#39;écran 2026-05-14 224032" src="https://github.com/user-attachments/assets/1a6cbdfa-80d5-4707-ac71-274e193dd188" />
 
 ## Architecture
 
